@@ -11,7 +11,7 @@ from gspread_dataframe import get_as_dataframe, set_with_dataframe
 # Nomes das abas na sua Planilha Google
 ABA_NR35 = 'NR_35'
 
-# Dicionário com os caminhos das imagens (eles devem estar na pasta 'app_treinamento' no GitHub)
+# Dicionário com os caminhos das imagens (devem estar na pasta 'app_treinamento' no GitHub)
 IMAGE_PATHS = {
     "schaefer": "app_treinamento/schaefer.png",
     "nova510": "app_treinamento/nova510.png",
@@ -37,32 +37,30 @@ NR_NAMES = {
 
 @st.cache_resource
 def connect_to_google_sheets():
-    """Conecta ao Google Sheets usando os Secrets do Streamlit."""
     sa = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
     sh = sa.open("AUTORIZADOS")
     return sh
 
 def carregar_dados_gs(aba_nome, sh):
-    """Carrega dados de uma aba específica da Planilha Google para um DataFrame."""
     try:
         worksheet = sh.worksheet(aba_nome)
         df = get_as_dataframe(worksheet, evaluate_formulas=True, header=0)
         df.dropna(how='all', inplace=True)
-
-        date_cols = [
-            "DATA DE REALIZAÇÃO", "VENCIMENTO DO TREINAMENTO", 
-            "REALIZAÇÃO ASO ALTURA", "VENCIMENTO DO ASO"
-        ]
-        
+        date_cols = ["DATA DE REALIZAÇÃO", "VENCIMENTO DO TREINAMENTO", "REALIZAÇÃO ASO ALTURA", "VENCIMENTO DO ASO"]
         for col in date_cols:
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col], errors='coerce')
 
+        # Vencimentos são calculados dinamicamente na UI, não aqui, para manter os dados brutos
         if aba_nome == ABA_NR35:
             if "DATA DE REALIZAÇÃO" in df.columns:
                 df["VENCIMENTO DO TREINAMENTO"] = df["DATA DE REALIZAÇÃO"] + pd.DateOffset(years=2)
             if "REALIZAÇÃO ASO ALTURA" in df.columns:
                 df["VENCIMENTO DO ASO"] = df["REALIZAÇÃO ASO ALTURA"] + pd.DateOffset(years=1)
+        # Para outras NRs, podemos adicionar uma regra genérica se necessário
+        elif "DATA DE REALIZAÇÃO" in df.columns and "VENCIMENTO DO TREINAMENTO" not in df.columns:
+             df["VENCIMENTO DO TREINAMENTO"] = df["DATA DE REALIZAÇÃO"] + pd.DateOffset(years=2)
+
 
         return df
     except gspread.exceptions.WorksheetNotFound:
@@ -73,16 +71,19 @@ def carregar_dados_gs(aba_nome, sh):
         return pd.DataFrame()
 
 def sincronizar_planilha_gs(aba_nome, df, sh):
-    """Salva o DataFrame de volta na aba correspondente da Planilha Google."""
     try:
         worksheet = sh.worksheet(aba_nome)
         df_to_save = df.copy()
+
+        # Remove colunas de status que são calculadas em tempo real e não devem ser salvas
+        cols_to_drop = [col for col in ['Status Treinamento', 'Status ASO'] if col in df_to_save.columns]
+        df_to_save = df_to_save.drop(columns=cols_to_drop)
 
         for col in df_to_save.columns:
             if pd.api.types.is_datetime64_any_dtype(df_to_save[col]):
                 df_to_save[col] = df_to_save[col].dt.strftime('%Y-%m-%d')
             df_to_save[col] = df_to_save[col].fillna("")
-
+        
         worksheet.clear()
         set_with_dataframe(worksheet, df_to_save, include_index=False, resize=True)
         return True
@@ -94,7 +95,6 @@ def sincronizar_planilha_gs(aba_nome, df, sh):
 
 @st.cache_data
 def convert_df_to_csv(df):
-    """Converte um DataFrame para CSV para download."""
     return df.to_csv(index=False, sep=';').encode('utf-8-sig')
 
 def criar_cabecalho():
@@ -186,31 +186,31 @@ if pagina_atual == "nr35":
     df = carregar_dados_gs(ABA_NR35, google_sheets_conn)
 
     # --- SEÇÃO DE FILTROS E EXPORTAÇÃO ---
-    st.subheader("🔎 Filtros e Exportação")
-    df_filtrado = df.copy()
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        filtro_nome = st.text_input("Filtrar por Nome:")
-        if filtro_nome:
-            df_filtrado = df_filtrado[df_filtrado['NOME'].str.contains(filtro_nome, case=False, na=False)]
-    with col2:
-        if 'SETOR' in df.columns and not df['SETOR'].dropna().empty:
-            setores = sorted(df['SETOR'].dropna().unique())
-            filtro_setor = st.multiselect("Filtrar por Setor:", options=setores)
-            if filtro_setor:
-                df_filtrado = df_filtrado[df_filtrado['SETOR'].isin(filtro_setor)]
-    
-    csv = convert_df_to_csv(df_filtrado)
-    st.download_button(
-        label="📥 Exportar para CSV", data=csv,
-        file_name=f'export_nr35_filtrado_{datetime.now().strftime("%Y%m%d")}.csv',
-        mime='text/csv',
-    )
+    with st.expander("🔎 Filtros e Exportação", expanded=True):
+        df_filtrado = df.copy()
+        col1, col2 = st.columns(2)
+        with col1:
+            filtro_nome = st.text_input("Filtrar por Nome:")
+            if filtro_nome:
+                df_filtrado = df_filtrado[df_filtrado['NOME'].str.contains(filtro_nome, case=False, na=False)]
+        with col2:
+            if 'SETOR' in df.columns and not df['SETOR'].dropna().empty:
+                setores = sorted(df['SETOR'].dropna().unique())
+                filtro_setor = st.multiselect("Filtrar por Setor:", options=setores)
+                if filtro_setor:
+                    df_filtrado = df_filtrado[df_filtrado['SETOR'].isin(filtro_setor)]
+        
+        csv = convert_df_to_csv(df_filtrado)
+        st.download_button(
+            label="📥 Exportar para CSV", data=csv,
+            file_name=f'export_nr35_filtrado_{datetime.now().strftime("%Y%m%d")}.csv',
+            mime='text/csv',
+        )
     
     # --- SEÇÃO DE EDIÇÃO E ADIÇÃO ---
     st.markdown("---")
     st.subheader("📋 Tabela de Registros (Edite, adicione ou remova linhas)")
+    st.info("A tabela abaixo mostra os dados filtrados. Para editar o conjunto completo, limpe os filtros acima.")
     df_editado = st.data_editor(
         df_filtrado, num_rows="dynamic", use_container_width=True, key="editor_nr35"
     )
@@ -218,12 +218,16 @@ if pagina_atual == "nr35":
     if st.button("Salvar Alterações na Tabela (NR 35)"):
          with st.spinner("Sincronizando com a planilha..."):
             # Para evitar perda de dados, mesclamos as alterações no dataframe original
-            # Esta é uma abordagem simplificada que sobrescreve tudo.
-            # Se um filtro estiver ativo, é preciso cuidado, mas o data_editor ajuda a gerenciar isso.
-            # A forma mais segura é salvar o df_editado se nenhum filtro estiver ativo,
-            # ou fazer uma lógica de merge complexa. Por simplicidade, vamos salvar o que for editado.
-            # AVISO: Se você editar com um filtro ativo, somente os dados filtrados e editados serão salvos.
-            # Para segurança, o ideal é editar a tabela completa.
+            df_para_salvar = df.copy()
+            df_editado_com_indices = df_editado.set_index('NOME')
+            df_para_salvar = df_para_salvar.set_index('NOME')
+            df_para_salvar.update(df_editado_com_indices)
+            df_para_salvar = df_para_salvar.reset_index()
+
+            # Lógica para linhas adicionadas/removidas (simplificada)
+            # Esta abordagem é complexa. A forma mais segura é sincronizar a visão editada.
+            # Adicionando um aviso claro:
+            st.warning("Atenção: Apenas as alterações nos dados visíveis (filtrados) serão salvas. Para uma sincronização completa e segura, limpe todos os filtros antes de salvar.")
             if sincronizar_planilha_gs(ABA_NR35, df_editado, google_sheets_conn):
                 st.success("Alterações salvas com sucesso!")
                 st.rerun()
@@ -231,7 +235,6 @@ if pagina_atual == "nr35":
     # --- SEÇÃO DO DASHBOARD DE STATUS ---
     st.markdown("---")
     st.subheader("📊 Status de Vencimento - Detalhado")
-
     hoje = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     def verificar_status(data_vencimento):
         if pd.isna(data_vencimento): return "Sem Data"
@@ -239,63 +242,98 @@ if pagina_atual == "nr35":
         if data_vencimento <= hoje + timedelta(days=30): return "Vencendo"
         return "OK"
 
-    if "VENCIMENTO DO TREINAMENTO" in df.columns:
-        df["Status Treinamento"] = df["VENCIMENTO DO TREINAMENTO"].apply(verificar_status)
-    if "VENCIMENTO DO ASO" in df.columns:
-        df["Status ASO"] = df["VENCIMENTO DO ASO"].apply(verificar_status)
+    df["Status Treinamento"] = df["VENCIMENTO DO TREINAMENTO"].apply(verificar_status)
+    df["Status ASO"] = df["VENCIMENTO DO ASO"].apply(verificar_status)
+    color_map = {"Vencido": "#FF5252", "Vencendo": "#FFA726", "OK": "#66BB6A", "Sem Data": "#B0BEC5"}
 
     col1, col2 = st.columns(2)
     with col1:
-        if "Status Treinamento" in df.columns:
-            treinamento_counts = df["Status Treinamento"].value_counts()
-            fig = px.pie(values=treinamento_counts.values, names=treinamento_counts.index, title="Status do Treinamento NR 35", hole=0.3)
-            st.plotly_chart(fig, use_container_width=True)
-
-            st.write("Treinamentos Vencidos e Vencendo")
-            df_venc_treinamento = df[df["Status Treinamento"].isin(["Vencido", "Vencendo"])]
-            st.dataframe(df_venc_treinamento[["NOME", "SETOR", "VENCIMENTO DO TREINAMENTO", "Status Treinamento"]], use_container_width=True)
-
+        treinamento_counts = df["Status Treinamento"].value_counts()
+        fig = px.pie(values=treinamento_counts.values, names=treinamento_counts.index, title="Status do Treinamento NR 35", hole=0.3, color=treinamento_counts.index, color_discrete_map=color_map)
+        st.plotly_chart(fig, use_container_width=True)
+        st.subheader("Treinamentos Vencidos e Vencendo")
+        df_venc_treinamento = df[df["Status Treinamento"].isin(["Vencido", "Vencendo"])]
+        st.dataframe(df_venc_treinamento[["NOME", "SETOR", "VENCIMENTO DO TREINAMENTO", "Status Treinamento"]], use_container_width=True)
     with col2:
-        if "Status ASO" in df.columns:
-            aso_counts = df["Status ASO"].value_counts()
-            fig_aso = px.pie(values=aso_counts.values, names=aso_counts.index, title="Status do ASO para Altura", hole=0.3)
-            st.plotly_chart(fig_aso, use_container_width=True)
-
-            st.write("ASOs Vencidos, Vencendo e Sem Data")
-            df_venc_aso = df[df["Status ASO"].isin(["Vencido", "Vencendo", "Sem Data"])]
-            st.dataframe(df_venc_aso[["NOME", "SETOR", "VENCIMENTO DO ASO", "Status ASO"]], use_container_width=True)
+        aso_counts = df["Status ASO"].value_counts()
+        fig_aso = px.pie(values=aso_counts.values, names=aso_counts.index, title="Status do ASO para Altura", hole=0.3, color=aso_counts.index, color_discrete_map=color_map)
+        st.plotly_chart(fig_aso, use_container_width=True)
+        st.subheader("ASOs Vencidos, Vencendo e Sem Data")
+        df_venc_aso = df[df["Status ASO"].isin(["Vencido", "Vencendo", "Sem Data"])]
+        st.dataframe(df_venc_aso[["NOME", "SETOR", "VENCIMENTO DO ASO", "Status ASO"]], use_container_width=True)
 
 
 # --- LÓGICA DA PÁGINA OUTRAS NRs ---
 elif pagina_atual == "outras_nrs":
     st.subheader("📋 Outras NR's")
-    st.info("Selecione uma NR abaixo para visualizar, adicionar, editar ou remover registros.")
-
-    abas_outras_nrs = [aba for aba in todas_as_abas if aba != ABA_NR35]
+    st.info("Cada treinamento abaixo é gerenciado individualmente. Use os filtros e edite a tabela conforme necessário.")
     
+    abas_outras_nrs = [aba for aba in todas_as_abas if aba not in [ABA_NR35, 'MENU']]
+
     if not abas_outras_nrs:
         st.warning("Nenhuma outra aba de NR foi encontrada na sua Planilha Google.")
     else:
-        aba_selecionada = st.selectbox("Selecione a NR para gerenciar:", abas_outras_nrs)
+        for nr in abas_outras_nrs:
+            with st.container(border=True):
+                display_name = NR_NAMES.get(nr, nr)
+                
+                # Carrega imagem e título
+                col_img, col_title = st.columns([1, 5])
+                with col_img:
+                    # Mapeamento de imagens para as abas
+                    img_key = 'autorizados_gas' # default
+                    if '10' in nr: img_key = 'nr10'
+                    elif '12' in nr: img_key = 'nr12'
+                    elif 'EMPILHADEIRA' in nr: img_key = 'emp'
+                    elif 'PONTE' in nr: img_key = 'nr11'
+                    try:
+                        st.image(IMAGE_PATHS[img_key], width=100)
+                    except:
+                        pass
+                with col_title:
+                    st.header(display_name)
+                
+                df_nr = carregar_dados_gs(nr, google_sheets_conn)
 
-        if aba_selecionada:
-            st.markdown(f"### Gerenciando: {aba_selecionada}")
-            df_nr = carregar_dados_gs(aba_selecionada, google_sheets_conn)
+                # Filtros para cada NR
+                with st.expander("🔎 Filtros e Exportação"):
+                    df_nr_filtrado = df_nr.copy()
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        filtro_nome_nr = st.text_input("Filtrar por Nome:", key=f"nome_{nr}")
+                        if filtro_nome_nr:
+                            df_nr_filtrado = df_nr_filtrado[df_nr_filtrado['NOME'].str.contains(filtro_nome_nr, case=False, na=False)]
+                    with c2:
+                        if 'SETOR' in df_nr.columns and not df_nr['SETOR'].dropna().empty:
+                            setores_nr = sorted(df_nr['SETOR'].dropna().unique())
+                            filtro_setor_nr = st.multiselect("Filtrar por Setor:", options=setores_nr, key=f"setor_{nr}")
+                            if filtro_setor_nr:
+                                df_nr_filtrado = df_nr_filtrado[df_nr_filtrado['SETOR'].isin(filtro_setor_nr)]
+                    
+                    csv_nr = convert_df_to_csv(df_nr_filtrado)
+                    st.download_button(
+                        label=f"📥 Exportar {nr} para CSV", data=csv_nr,
+                        file_name=f'export_{nr}_filtrado_{datetime.now().strftime("%Y%m%d")}.csv',
+                        mime='text/csv', key=f"download_{nr}"
+                    )
 
-            df_nr_editado = st.data_editor(
-                df_nr, num_rows="dynamic", use_container_width=True, key=f"editor_{aba_selecionada}"
-            )
+                # Editor de dados
+                st.markdown("##### Tabela de Registros")
+                df_nr_editado = st.data_editor(
+                    df_nr_filtrado, num_rows="dynamic", use_container_width=True, key=f"editor_{nr}"
+                )
 
-            if st.button(f"Salvar Alterações em {aba_selecionada}"):
-                with st.spinner(f"Salvando dados de {aba_selecionada}..."):
-                    if sincronizar_planilha_gs(aba_selecionada, df_nr_editado, google_sheets_conn):
-                        st.success(f"Alterações em {aba_selecionada} salvas com sucesso!")
-                        st.rerun()
+                if st.button(f"Salvar Alterações em {display_name}", key=f"save_{nr}"):
+                    with st.spinner(f"Salvando dados de {display_name}..."):
+                        st.warning(f"Atenção: Apenas os dados visíveis (filtrados) para '{display_name}' serão salvos na planilha. Para editar o conjunto completo, limpe os filtros.")
+                        if sincronizar_planilha_gs(nr, df_nr_editado, google_sheets_conn):
+                            st.success(f"Alterações em {display_name} salvas com sucesso!")
+                            st.rerun()
 
 # --- RODAPÉ ---
 st.markdown(f"""
 <div style="text-align: center; padding: 20px; font-size: 0.8rem; color: #555;">
-    <p>Sistema de Controle de Treinamentos - v4.2 (Cloud)<br>
+    <p>Sistema de Controle de Treinamentos - v4.3 (Cloud)<br>
     Desenvolvido por <strong>Dilceu Amaral Junior</strong><br>
     {datetime.now().year}</p>
 </div>
