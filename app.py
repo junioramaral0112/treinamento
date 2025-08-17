@@ -40,7 +40,7 @@ NR_NAMES = {
 def connect_to_google_sheets():
     """Conecta ao Google Sheets usando os Secrets do Streamlit."""
     sa = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
-    # IMPORTANTE: Coloque o NOME EXATO da sua planilha Google aqui
+    # NOME CORRIGIDO DA SUA PLANILHA
     sh = sa.open("AUTORIZADOS")
     return sh
 
@@ -48,19 +48,28 @@ def carregar_dados_gs(aba_nome, sh):
     """Carrega dados de uma aba específica da Planilha Google para um DataFrame."""
     try:
         worksheet = sh.worksheet(aba_nome)
+        # Carrega os dados, permitindo que o pandas tente inferir os tipos
         df = get_as_dataframe(worksheet, evaluate_formulas=True, header=0)
         df.dropna(how='all', inplace=True)
-        df = df.astype(str) # Garante que tudo seja string para evitar erros de tipo
 
-        # Converte colunas de data, ignorando erros
-        date_cols = [col for col in df.columns if 'DATA' in col.upper() or 'VENCIMENTO' in col.upper()]
+        # Define as colunas que devem ser tratadas como datas
+        date_cols = [
+            "DATA DE REALIZAÇÃO", "VENCIMENTO DO TREINAMENTO",
+            "REALIZAÇÃO ASO ALTURA", "VENCIMENTO DO ASO"
+        ]
+        
+        # Converte as colunas de data, transformando qualquer erro em NaT (Not a Time)
         for col in date_cols:
-            df[col] = pd.to_datetime(df[col], errors='coerce')
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col], errors='coerce')
 
-        # Recalcula vencimentos para garantir consistência (específico da NR35)
+        # Recalcula vencimentos (específico da NR35) de forma segura
         if aba_nome == ABA_NR35:
             if "DATA DE REALIZAÇÃO" in df.columns:
+                # A operação de soma agora é segura, pois a coluna é garantidamente do tipo datetime
+                # A soma de NaT com DateOffset resulta em NaT, o que evita erros.
                 df["VENCIMENTO DO TREINAMENTO"] = df["DATA DE REALIZAÇÃO"] + pd.DateOffset(years=2)
+            
             if "REALIZAÇÃO ASO ALTURA" in df.columns:
                 df["VENCIMENTO DO ASO"] = df["REALIZAÇÃO ASO ALTURA"] + pd.DateOffset(years=1)
 
@@ -82,6 +91,9 @@ def sincronizar_planilha_gs(aba_nome, df, sh):
         for col in df_to_save.columns:
             if pd.api.types.is_datetime64_any_dtype(df_to_save[col]):
                 df_to_save[col] = df_to_save[col].dt.strftime('%Y-%m-%d')
+            # Garante que valores nulos sejam salvos como strings vazias
+            df_to_save[col] = df_to_save[col].fillna("")
+
 
         # Limpa a aba e escreve o novo conteúdo
         worksheet.clear()
@@ -96,7 +108,6 @@ def sincronizar_planilha_gs(aba_nome, df, sh):
 def criar_cabecalho():
     """Cria o cabeçalho visual da página."""
     try:
-        # Função interna para carregar imagens locais e converter para base64
         @st.cache_data
         def load_image(path):
             with open(path, "rb") as f:
@@ -109,7 +120,6 @@ def criar_cabecalho():
         logo_img = load_image(IMAGE_PATHS["logo"])
         sesmt_img = load_image(IMAGE_PATHS["sesmt"])
         
-        # Estilos CSS
         st.markdown(f"""
         <style>
             .header-container {{ position: relative; background-image: url("data:image/png;base64,{bg_img}"); background-size: cover; background-position: center; height: 280px; border-radius: 10px; margin-bottom: 25px; }}
@@ -126,7 +136,6 @@ def criar_cabecalho():
         </style>
         """, unsafe_allow_html=True)
 
-        # HTML do cabeçalho
         if page_param == "outras_nrs":
             st.markdown(f"""
             <div class="header-container">
@@ -146,38 +155,30 @@ def criar_cabecalho():
                 <div class="header-text">Controle de Treinamentos NR</div>
             </div>""", unsafe_allow_html=True)
     except FileNotFoundError as e:
-        st.error(f"Erro ao carregar imagem: {e}. Verifique se a pasta 'app_treinamento' e todas as imagens estão no seu repositório GitHub.")
+        st.error(f"Erro ao carregar imagem: {e}. Verifique se a pasta 'app_treinamento' e todas as imagens estão no seu repositório GitHub com os nomes corretos.")
     except Exception as e:
         st.error(f"Ocorreu um erro inesperado ao criar o cabeçalho: {e}")
 
 # --- ESTRUTURA PRINCIPAL DO APLICATIVO ---
 
-# Configuração da página
 st.set_page_config(page_title="Controle NR", layout="wide")
 
-# Aplica a cor de fundo
 st.markdown("""
 <style>
-.stApp {
-    background-color: #80d1e8;
-}
+.stApp { background-color: #80d1e8; }
 </style>
 """, unsafe_allow_html=True)
 
-# Conecta ao Google Sheets no início
 try:
     google_sheets_conn = connect_to_google_sheets()
-    # Pega a lista de todas as abas (worksheets) na planilha
     todas_as_abas = [ws.title for ws in google_sheets_conn.worksheets()]
 except Exception as e:
     st.error("Falha crítica na conexão com o Google Sheets. Verifique os 'Secrets' e as permissões da API no Google Cloud.")
     st.info("Detalhes do erro: " + str(e))
     st.stop()
 
-# Renderiza o cabeçalho
 criar_cabecalho()
 
-# Sistema de navegação por abas
 if 'page' not in st.query_params:
     st.query_params.page = "nr35"
 pagina_atual = st.query_params.page
@@ -192,60 +193,53 @@ st.markdown(f"""
 
 # --- LÓGICA DA PÁGINA NR35 ---
 if pagina_atual == "nr35":
+    st.subheader("Gerenciamento de Treinamentos - NR 35")
     df = carregar_dados_gs(ABA_NR35, google_sheets_conn)
-    
-    # Adicionar novo registro
+
+    # Sessão para Adicionar novo registro
     with st.expander("➕ Adicionar Novo Registro na NR35"):
-        with st.form("novo_registro_form", clear_on_submit=True):
-            st.subheader("Adicionar Novo Registro")
-            c1, c2 = st.columns(2)
-            with c1:
+        with st.form("novo_registro_form_nr35", clear_on_submit=True):
+            cols = st.columns(2)
+            with cols[0]:
                 nome = st.text_input("NOME*", key="nr35_nome")
                 opcoes_unidade = sorted(['Biguaçu', 'Floripa', 'Palhoça'])
                 unidade = st.selectbox("UNIDADE*", options=opcoes_unidade, index=None, placeholder="Selecione...", key="nr35_unidade")
                 opcoes_setor = sorted(['Acabamento', 'Astec', 'Desmolde', 'Elétrica', 'Estofaria', 'Gel', 'Laminação', 'Modelagem', 'Pintura', 'Rebarba'])
                 setor = st.selectbox("SETOR*", options=opcoes_setor, index=None, placeholder="Selecione...", key="nr35_setor")
-                aso_altura = st.selectbox("ASO ALTURA*", ["Apto", "Inapto"], key="nr35_aso_altura")
-            
-            with c2:
+            with cols[1]:
                 data_realizacao = st.date_input("Data de Realização do TREINAMENTO*", value=None, key="nr35_data_treinamento")
                 data_aso_realizacao = st.date_input("Data de Realização do ASO", value=None, key="nr35_data_aso")
-                nao_possui_adesivo = st.selectbox("NÃO POSSUI ADESIVO*", ["SIM", "NÃO"], key="nr35_adesivo")
-                observacao = st.text_input("OBSERVAÇÃO", key="nr35_obs")
+                aso_altura = st.selectbox("ASO ALTURA*", ["Apto", "Inapto"], key="nr35_aso_altura")
 
-            if st.form_submit_button("Salvar Novo Registro"):
+            observacao = st.text_input("OBSERVAÇÃO", key="nr35_obs")
+            
+            if st.form_submit_button("Adicionar Registro"):
                 if not all([nome, unidade, setor, data_realizacao]):
                     st.warning("Preencha todos os campos obrigatórios (*)")
                 else:
-                    novo_registro = {
+                    novo_registro = pd.DataFrame([{
                         "NOME": nome, "UNIDADE": unidade, "SETOR": setor,
-                        "DATA DE REALIZAÇÃO": data_realizacao,
-                        "REALIZAÇÃO ASO ALTURA": data_aso_realizacao,
+                        "DATA DE REALIZAÇÃO": pd.to_datetime(data_realizacao),
+                        "REALIZAÇÃO ASO ALTURA": pd.to_datetime(data_aso_realizacao) if data_aso_realizacao else pd.NaT,
                         "ASO ALTURA": aso_altura,
-                        "NÃO POSSUI ADESIVO": nao_possui_adesivo, 
                         "OBSERVAÇÃO": observacao
-                    }
-                    df_novo_registro = pd.DataFrame([novo_registro])
-                    df_atualizado = pd.concat([df, df_novo_registro], ignore_index=True)
-
-                    with st.spinner("Salvando..."):
+                    }])
+                    df_atualizado = pd.concat([df, novo_registro], ignore_index=True)
+                    
+                    with st.spinner("Adicionando e salvando..."):
                         if sincronizar_planilha_gs(ABA_NR35, df_atualizado, google_sheets_conn):
                             st.success("Registro adicionado com sucesso!")
-                            st.balloons()
                             st.rerun()
 
-    # Tabela principal com edição
+    st.markdown("---")
     st.subheader("📋 Tabela de Registros (NR 35)")
-    st.info("Clique nas células para editar. Adicione ou remova linhas e depois clique em 'Salvar Alterações'.")
+    st.info("Clique nas células para editar. Adicione ou remova linhas e depois clique no botão 'Salvar Alterações na Tabela' abaixo.")
     
     df_editado = st.data_editor(
-        df,
-        num_rows="dynamic",
-        use_container_width=True,
-        key="editor_nr35"
+        df, num_rows="dynamic", use_container_width=True, key="editor_nr35"
     )
 
-    if st.button("Salvar Alterações na Tabela NR35"):
+    if st.button("Salvar Alterações na Tabela (NR 35)"):
          with st.spinner("Sincronizando com a planilha..."):
             if sincronizar_planilha_gs(ABA_NR35, df_editado, google_sheets_conn):
                 st.success("Alterações salvas com sucesso!")
@@ -264,15 +258,11 @@ elif pagina_atual == "outras_nrs":
         aba_selecionada = st.selectbox("Selecione a NR para gerenciar:", abas_outras_nrs)
 
         if aba_selecionada:
-            df_nr = carregar_dados_gs(aba_selecionada, google_sheets_conn)
-            
             st.markdown(f"### Gerenciando: {aba_selecionada}")
+            df_nr = carregar_dados_gs(aba_selecionada, google_sheets_conn)
 
             df_nr_editado = st.data_editor(
-                df_nr,
-                num_rows="dynamic",
-                use_container_width=True,
-                key=f"editor_{aba_selecionada}"
+                df_nr, num_rows="dynamic", use_container_width=True, key=f"editor_{aba_selecionada}"
             )
 
             if st.button(f"Salvar Alterações em {aba_selecionada}"):
@@ -284,9 +274,8 @@ elif pagina_atual == "outras_nrs":
 # --- RODAPÉ ---
 st.markdown(f"""
 <div style="text-align: center; padding: 20px; font-size: 0.8rem; color: #555;">
-    <p>Sistema de Controle de Treinamentos - v4.0 (Cloud)<br>
+    <p>Sistema de Controle de Treinamentos - v4.1 (Cloud)<br>
     Desenvolvido por <strong>Dilceu Amaral Junior</strong><br>
     {datetime.now().year}</p>
 </div>
 """, unsafe_allow_html=True)
-
