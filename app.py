@@ -41,7 +41,7 @@ def connect_to_google_sheets():
     """Conecta ao Google Sheets usando os Secrets do Streamlit."""
     sa = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
     # IMPORTANTE: Coloque o NOME EXATO da sua planilha Google aqui
-    sh = sa.open("Controle_Treinamentos_NRs")
+    sh = sa.open("AUTORIZADOS")
     return sh
 
 def carregar_dados_gs(aba_nome, sh):
@@ -289,3 +289,4 @@ st.markdown(f"""
     {datetime.now().year}</p>
 </div>
 """, unsafe_allow_html=True)
+
