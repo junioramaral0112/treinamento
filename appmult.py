@@ -121,3 +121,4 @@ if opcao == "👤 Treinamentos":
     tela_treinamentos()
 elif opcao == "🪜 Gestão de Escadas":
     tela_escadas()
+
