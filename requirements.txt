@@ -1,6 +1,5 @@
 streamlit
 pandas
-gspread
-gspread-dataframe
-plotly
+st-gsheets-connection
+streamlit-qrcode-scanner
 openpyxl
