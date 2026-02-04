@@ -44,7 +44,7 @@ def tela_treinamentos():
                 c1, c2 = st.columns(2)
                 
                 with c1:
-                    # Trava contra NaT (Datas vazias)
+                    # Trava contra NaT (Datas vazias) para evitar erro de strftime
                     datas_t = pd.to_datetime(resultados['Vencimento Treinamento'], dayfirst=True, errors='coerce').dropna()
                     if not datas_t.empty:
                         v_t = datas_t.max()
@@ -135,12 +135,12 @@ def tela_escadas():
 
 # --- MENU LATERAL (SIDEBAR) ---
 with st.sidebar:
-    # IMAGEM LOCAL PARA TESTE
+    # AJUSTE PARA O REPOSITÓRIO GITHUB
     try:
-        caminho_logo = r"C:\Users\dilceu.junior\Desktop\sipat_painel\logo_empresa.png"
-        st.image(caminho_logo, use_container_width=True)
+        # Basta usar o nome do arquivo que está no seu GitHub
+        st.image("logo_empresa.png", use_container_width=True)
     except:
-        st.warning("⚠️ Logo não encontrado.")
+        st.warning("⚠️ Logo 'logo_empresa.png' não encontrado no repositório.")
         
     st.title("🚀 Portal SST")
     opcao = st.radio("Selecione a ferramenta:", ["👤 Treinamentos", "🪜 Escadas"])
@@ -185,5 +185,3 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
-
