@@ -20,7 +20,6 @@ URL_TREINAMENTOS = "https://docs.google.com/spreadsheets/d/1Qlved6PPLPNSyfhaswGD
 
 URL_ESCADAS = "https://docs.google.com/spreadsheets/d/131wLP89GL5xTfxe8EN3ajgzoSFH2r69WKEromCd6_i0/export?format=csv&gid=532538193"
 
-
 # =====================================================
 # TELA 1 - TREINAMENTOS
 # =====================================================
@@ -92,19 +91,23 @@ def tela_treinamentos():
                         linha_nr = resultados[resultados[nr].astype(str).str.lower().str.contains('sim')]
 
                         if not linha_nr.empty:
+                            # Pegamos a última linha
                             data_v = pd.to_datetime(
-                                linha_nr.iloc[-1]['Vencimento Treinamento'],
+                                linha_nr.iloc[-1].get('Vencimento Treinamento', None),
                                 dayfirst=True,
                                 errors='coerce'
                             )
 
-                            if pd.notna(data_v):
-                                with st_cols[idx_col % 3]:
+                            with st_cols[idx_col % 3]:
+                                if pd.isna(data_v):
+                                    # Sem data -> válido
+                                    st.success(f"**{nr}**\nVálido (sem data de vencimento)")
+                                else:
                                     if data_v >= hoje:
                                         st.success(f"**{nr}**\nVence em: {data_v.strftime('%d/%m/%Y')}")
                                     else:
                                         st.error(f"**{nr}**\nVENCIDO: {data_v.strftime('%d/%m/%Y')}")
-                                    idx_col += 1
+                                idx_col += 1
 
             else:
                 st.error("Matrícula não encontrada.")
