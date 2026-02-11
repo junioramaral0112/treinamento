@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from streamlit_qrcode_scanner import qrcode_scanner
-import base64
+import os
 
 # =====================================================
 # CONFIGURAÇÃO DA PÁGINA
@@ -22,26 +22,7 @@ URL_ESCADAS = "https://docs.google.com/spreadsheets/d/131wLP89GL5xTfxe8EN3ajgzoS
 
 
 # =====================================================
-# CONVERSOR DE LINK ONEDRIVE (TREINAMENTOS)
-# =====================================================
-def obter_link_foto(url_original):
-    if pd.isna(url_original) or str(url_original).strip() == "":
-        return None
-
-    url = str(url_original).strip()
-
-    if "onedrive" in url or "1drv.ms" in url:
-        try:
-            b64_url = base64.b64encode(url.encode()).decode().replace('/', '_').replace('+', '-').rstrip('=')
-            return f"https://api.onedrive.com/v1.0/shares/u!{b64_url}/root/content"
-        except:
-            return url
-
-    return url
-
-
-# =====================================================
-# TELA 1 - TREINAMENTOS (NÃO ALTERADA)
+# TELA 1 - TREINAMENTOS
 # =====================================================
 def tela_treinamentos():
     st.header("👤 Consulta de Treinamentos")
@@ -64,18 +45,34 @@ def tela_treinamentos():
 
                 col_foto, col_info = st.columns([1, 3])
 
+                # =========================
+                # FOTO VIA GITHUB (LOCAL)
+                # =========================
                 with col_foto:
-                    link_direto = obter_link_foto(colaborador_base.get("Foto"))
-                    if link_direto:
-                        st.image(link_direto, width=180)
+                    matricula_foto = str(colaborador_base['Matricula']).strip()
+
+                    caminho_png = f"fotos/{matricula_foto}.png"
+                    caminho_jpg = f"fotos/{matricula_foto}.jpg"
+                    caminho_jpeg = f"fotos/{matricula_foto}.jpeg"
+
+                    if os.path.exists(caminho_png):
+                        st.image(caminho_png, width=180)
+                    elif os.path.exists(caminho_jpg):
+                        st.image(caminho_jpg, width=180)
+                    elif os.path.exists(caminho_jpeg):
+                        st.image(caminho_jpeg, width=180)
                     else:
                         st.image("https://cdn-icons-png.flaticon.com/512/149/149071.png", width=150)
 
                 with col_info:
                     st.subheader(f"{colaborador_base['Nome']}")
-                    st.write(f"*Unidade:* {colaborador_base['Unidade']} | *Setor:* {colaborador_base['Setor']}")
+                    st.write(f"**Unidade:** {colaborador_base['Unidade']} | **Setor:** {colaborador_base['Setor']}")
 
-                    v_aso = pd.to_datetime(colaborador_base['Vencimento ASO'], dayfirst=True, errors='coerce')
+                    v_aso = pd.to_datetime(
+                        colaborador_base['Vencimento ASO'],
+                        dayfirst=True,
+                        errors='coerce'
+                    )
 
                     if pd.notna(v_aso):
                         if v_aso >= hoje:
@@ -104,9 +101,9 @@ def tela_treinamentos():
                             if pd.notna(data_v):
                                 with st_cols[idx_col % 3]:
                                     if data_v >= hoje:
-                                        st.success(f"*{nr}*\nVence em: {data_v.strftime('%d/%m/%Y')}")
+                                        st.success(f"**{nr}**\nVence em: {data_v.strftime('%d/%m/%Y')}")
                                     else:
-                                        st.error(f"*{nr}*\nVENCIDO: {data_v.strftime('%d/%m/%Y')}")
+                                        st.error(f"**{nr}**\nVENCIDO: {data_v.strftime('%d/%m/%Y')}")
                                     idx_col += 1
 
             else:
@@ -117,7 +114,7 @@ def tela_treinamentos():
 
 
 # =====================================================
-# TELA 2 - ESCADAS (CORRIGIDA)
+# TELA 2 - ESCADAS
 # =====================================================
 def tela_escadas():
     st.header("🪜 Gestão de Escadas")
@@ -129,12 +126,9 @@ def tela_escadas():
 
         abas = st.tabs(["📷 Ler QR Code", "🔎 Consulta Manual"])
 
-        # =============================
         # QR CODE
-        # =============================
         with abas[0]:
             st.subheader("Scanner de QR Code")
-
             codigo_lido = qrcode_scanner(key="qr_escada")
 
             if codigo_lido:
@@ -150,12 +144,9 @@ def tela_escadas():
                 else:
                     st.error("Escada não encontrada ❌")
 
-        # =============================
         # CONSULTA MANUAL
-        # =============================
         with abas[1]:
             st.subheader("Consulta Manual")
-
             codigo_manual = st.text_input("Digite o Número de Identificação")
 
             if codigo_manual:
@@ -176,7 +167,7 @@ def tela_escadas():
 
 
 # =====================================================
-# MENU LATERAL (INALTERADO)
+# MENU LATERAL
 # =====================================================
 with st.sidebar:
     st.title("🚀 Portal SST")
