@@ -1,187 +1,126 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
-from streamlit_gsheets import GSheetsConnection
-from streamlit_qrcode_scanner import qrcode_scanner
+import os
+from datetime import datetime
 
-# 1. Configuração da Página (Responsividade total para Celular/PC)
-st.set_page_config(
-    page_title="Portal SST Integrado", 
-    layout="wide", 
-    page_icon="🛡️"
+# ===============================
+# CONFIGURAÇÃO INICIAL
+# ===============================
+
+st.set_page_config(page_title="Inspeção de Escadas", layout="wide")
+
+st.title("🪜 Sistema de Inspeção de Escadas")
+
+# Criar pasta fotos automaticamente se não existir
+if not os.path.exists("fotos"):
+    os.makedirs("fotos")
+
+# Arquivo banco de dados
+ARQUIVO = "dados_escadas.csv"
+
+# Criar CSV se não existir
+if not os.path.exists(ARQUIVO):
+    df = pd.DataFrame(columns=[
+        "ID", "Data", "Responsavel", "Setor",
+        "Condicao", "Observacao", "Foto"
+    ])
+    df.to_csv(ARQUIVO, index=False)
+
+# ===============================
+# MENU
+# ===============================
+
+menu = st.sidebar.selectbox(
+    "Menu",
+    ["Nova Inspeção", "Consultar Escada"]
 )
 
-# --- LINKS DAS PLANILHAS ---
-URL_TREINAMENTOS = "https://docs.google.com/spreadsheets/d/1Qlved6PPLPNSyfhaswGDTgvXkWZ8OcsRRm1yGGaUcz0/export?format=csv&gid=0"
-URL_ESCADAS = "https://docs.google.com/spreadsheets/d/131wLP89GL5xTfxe8EN3ajgzoSFH2r69WKEromCd6_i0/edit#gid=532538193"
+# ===============================
+# NOVA INSPEÇÃO
+# ===============================
 
-# --- FUNÇÃO TELA 1: TREINAMENTOS ---
-def tela_treinamentos():
-    st.header("👤 Consulta de Treinamentos")
-    
-    matricula_input = st.text_input("Digite a matrícula do trabalhador:", placeholder="Ex: 075835")
-    
-    if matricula_input:
-        try:
-            # Carrega a planilha
-            df = pd.read_csv(URL_TREINAMENTOS)
-            df.columns.values[0] = 'Matricula' 
-            
-            # Unificação de matrícula (075835 = 75835)
-            df['Mat_Num'] = pd.to_numeric(df['Matricula'], errors='coerce')
-            busca_num = pd.to_numeric(matricula_input, errors='coerce')
-            
-            resultados = df[df['Mat_Num'] == busca_num]
-            
-            if not resultados.empty:
-                colaborador = resultados.iloc[0]
-                hoje = datetime.now()
-                
-                st.subheader(f"Colaborador: {colaborador['Nome']}")
-                st.caption(f"📍 {colaborador['Unidade']} | {colaborador['Setor']}")
+if menu == "Nova Inspeção":
 
-                # Layout em colunas que se ajustam no celular
-                c1, c2 = st.columns(2)
-                
-                with c1:
-                    # Trava contra NaT (Datas vazias) para evitar erro de strftime
-                    datas_t = pd.to_datetime(resultados['Vencimento Treinamento'], dayfirst=True, errors='coerce').dropna()
-                    if not datas_t.empty:
-                        v_t = datas_t.max()
-                        if v_t >= hoje:
-                            st.success(f"✅ Treinamento: OK ({v_t.strftime('%d/%m/%Y')})")
-                        else:
-                            st.error(f"❌ Treinamento VENCIDO ({v_t.strftime('%d/%m/%Y')})")
-                    else:
-                        st.warning("⚠️ Sem data de Treinamento.")
+    st.subheader("📋 Registrar Nova Inspeção")
 
-                with c2:
-                    datas_a = pd.to_datetime(resultados['Vencimento ASO'], dayfirst=True, errors='coerce').dropna()
-                    if not datas_a.empty:
-                        v_a = datas_a.max()
-                        if v_a >= hoje:
-                            st.success(f"✅ ASO: OK ({v_a.strftime('%d/%m/%Y')})")
-                        else:
-                            st.error(f"❌ ASO VENCIDO ({v_a.strftime('%d/%m/%Y')})")
-                    else:
-                        st.warning("⚠️ Sem data de ASO.")
+    with st.form("form_inspecao"):
 
-                st.divider()
-                
-                # Consolidação de todas as NRs encontradas em todas as linhas
-                nrs = ['NR10', 'NR11 - Ponte Rolante', 'NR11 - Empilhadeira', 'NR12 - Prensa', 
-                       'NR12 - Serra', 'NR12 - Esmiril', 'NR12 - Meia Esquadria', 
-                       'Troca Gás Empilhadeira', 'NR33', 'NR35']
-                
-                autorizados = [n for n in nrs if n in df.columns and resultados[n].astype(str).str.strip().str.lower().eq('sim').any()]
-                
-                if autorizados:
-                    st.write("**Autorizações Identificadas:**")
-                    cols_nr = st.columns(2)
-                    for i, a in enumerate(autorizados):
-                        cols_nr[i % 2].write(f"✔️ {a}")
-                
-                obs_unicas = resultados['Observação'].dropna().unique()
-                if len(obs_unicas) > 0:
-                    st.info(f"📝 **Notas:** {'; '.join(obs_unicas)}")
-            else:
-                st.error("Matrícula não encontrada.")
-        except Exception as e:
-            st.error(f"Erro ao carregar dados: {e}")
+        id_escada = st.text_input("ID da Escada")
+        responsavel = st.text_input("Responsável")
+        setor = st.text_input("Setor")
 
-# --- FUNÇÃO TELA 2: ESCADAS ---
-def tela_escadas():
-    st.header("🪜 Gestão de Escadas")
-    
-    try:
-        conn = st.connection("gsheets", type=GSheetsConnection)
-        df_escadas = conn.read(spreadsheet=URL_ESCADAS, ttl=0)
-        df_escadas.columns = df_escadas.columns.str.strip()
+        condicao = st.selectbox(
+            "Condição",
+            ["Boa", "Regular", "Ruim"]
+        )
 
-        aba_qr, aba_id = st.tabs(["📷 Scanner QR", "⌨️ Digitar ID"])
-        id_busca = None
-        
-        with aba_qr:
-            qr = qrcode_scanner(key='scanner_escada')
-            if qr: id_busca = str(qr).strip().lstrip('0')
-        
-        with aba_id:
-            id_m = st.text_input("ID da Escada (Ex: 001):")
-            if id_m: id_busca = str(id_m).strip().lstrip('0')
+        observacao = st.text_area("Observações")
 
-        if id_busca:
-            df_escadas["ID_AUX"] = df_escadas["Número de Identificação"].astype(str).str.strip().str.lstrip('0')
-            res = df_escadas[df_escadas["ID_AUX"] == id_busca]
-            
-            if not res.empty:
-                ultima = res.iloc[-1]
-                data_inspecao = pd.to_datetime(ultima["Carimbo de data/hora"], dayfirst=True)
-                proxima = data_inspecao + timedelta(days=365)
-                
-                status = str(ultima.get("Status da Inspeção", "")).strip()
-                if "Aprovada" in status:
-                    st.success(f"### STATUS: {status}")
-                else:
-                    st.error(f"### STATUS: {status}")
-                
-                if datetime.now() > proxima:
-                    st.error(f"🚨 INSPEÇÃO VENCIDA EM {proxima.strftime('%d/%m/%Y')}")
-                else:
-                    st.info(f"📅 Validade até: {proxima.strftime('%d/%m/%Y')}")
-            else:
-                st.error("Escada não encontrada.")
-    except Exception as e:
-        st.error(f"Erro no sistema de escadas: {e}")
+        foto = st.file_uploader("📷 Upload da Foto", type=["jpg", "png", "jpeg"])
 
-# --- MENU LATERAL (SIDEBAR) ---
-with st.sidebar:
-    # AJUSTE PARA O REPOSITÓRIO GITHUB
-    try:
-        # Basta usar o nome do arquivo que está no seu GitHub
-        st.image("logo_empresa.png", use_container_width=True)
-    except:
-        st.warning("⚠️ Logo 'logo_empresa.png' não encontrado no repositório.")
-        
-    st.title("🚀 Portal SST")
-    opcao = st.radio("Selecione a ferramenta:", ["👤 Treinamentos", "🪜 Escadas"])
-    
-    st.divider()
-    st.write("### 🛠️ Ações Rápidas")
-    
-    # Botão de Inspeção
-    st.link_button("📝 Nova Inspeção (Forms)", "https://docs.google.com/forms/d/e/1FAIpQLScyv4M1N9A9v8p6O-n9x_r4_0o-p5W-v7Y-f9-0o-p5W-v7Y-f9-0o-p5W-v7Y-f9-0o-p5W-v7Y/viewform")
-    
-    if st.button("🔄 Atualizar Dados"):
-        st.rerun()
+        enviar = st.form_submit_button("Salvar Inspeção")
 
-# --- ROTEADOR DE TELAS ---
-if opcao == "👤 Treinamentos":
-    tela_treinamentos()
-else:
-    tela_escadas()
+    if enviar:
 
-# --- RODAPÉ PERSONALIZADO COM COPYRIGHT ---
-st.markdown(
-    """
-    <style>
-    .footer {
-        position: fixed;
-        left: 0;
-        bottom: 0;
-        width: 100%;
-        background-color: white;
-        color: #7d7d7d;
-        text-align: center;
-        padding: 10px;
-        font-size: 13px;
-        border-top: 1px solid #eaeaea;
-        z-index: 999;
-    }
-    </style>
-    <div class="footer">
-        © 2026 [Dilceu Junior]. Todos os direitos reservados. <br>
-        <span style="font-size: 11px;">Desenvolvido por JuniorAmaral</span>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+        if id_escada == "":
+            st.error("Informe o ID da escada.")
+        else:
+
+            nome_foto = ""
+
+            # Salvar foto
+            if foto is not None:
+                timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+                nome_foto = f"{id_escada}_{timestamp}.jpg"
+                caminho = os.path.join("fotos", nome_foto)
+
+                with open(caminho, "wb") as f:
+                    f.write(foto.getbuffer())
+
+            nova_linha = pd.DataFrame([{
+                "ID": id_escada,
+                "Data": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                "Responsavel": responsavel,
+                "Setor": setor,
+                "Condicao": condicao,
+                "Observacao": observacao,
+                "Foto": nome_foto
+            }])
+
+            df = pd.read_csv(ARQUIVO)
+            df = pd.concat([df, nova_linha], ignore_index=True)
+            df.to_csv(ARQUIVO, index=False)
+
+            st.success("✅ Inspeção salva com sucesso!")
+
+# ===============================
+# CONSULTAR ESCADA
+# ===============================
+
+elif menu == "Consultar Escada":
+
+    st.subheader("🔎 Consultar Escada por ID")
+
+    id_busca = st.text_input("Digite o ID da escada")
+
+    if id_busca:
+
+        df = pd.read_csv(ARQUIVO)
+
+        resultado = df[df["ID"] == id_busca]
+
+        if not resultado.empty:
+
+            st.success("Escada encontrada!")
+
+            st.dataframe(resultado)
+
+            for index, row in resultado.iterrows():
+
+                if row["Foto"] != "":
+                    caminho_foto = os.path.join("fotos", row["Foto"])
+
+                    if os.path.exists(caminho_foto):
+                        st.image(caminho_foto, caption="Foto da inspeção")
+        else:
+            st.warning("Escada não encontrada.")
