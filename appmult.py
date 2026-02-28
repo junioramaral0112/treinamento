@@ -211,3 +211,9 @@ if opcao == "👤 Treinamentos":
     tela_treinamentos()
 else:
     tela_escadas()
+st.divider()
+st.markdown(
+    "<div style='text-align: center; color: gray;'>Desenvolvido por <b>Dilceu Junior</b></div>",
+    unsafe_allow_html=True
+)
+
