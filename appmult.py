@@ -45,7 +45,7 @@ def tela_treinamentos():
                 col_foto, col_info = st.columns([1, 3])
 
                 # =========================
-                # FOTO VIA GITHUB (LOCAL)
+                # FOTO LOCAL
                 # =========================
                 with col_foto:
                     matricula_foto = str(colaborador_base['Matricula']).strip()
@@ -82,32 +82,41 @@ def tela_treinamentos():
                 st.divider()
                 st.write("### 📜 Validades de Treinamentos Identificados")
 
-                nrs_para_buscar = ['NR10', 'NR35', 'NR11', 'NR12', 'NR18']
+                nrs_para_buscar = ['NR10', 'NR35', 'NR11', 'NR12', 'NR18', 'Troca Gás']
+
                 st_cols = st.columns(3)
                 idx_col = 0
 
                 for nr in nrs_para_buscar:
                     if nr in resultados.columns:
-                        linha_nr = resultados[resultados[nr].astype(str).str.lower().str.contains('sim')]
 
-                        if not linha_nr.empty:
-                            # Pegamos a última linha
-                            data_v = pd.to_datetime(
-                                linha_nr.iloc[-1].get('Vencimento Treinamento', None),
+                        # 🔎 TODAS as linhas com "sim"
+                        linhas_validas = resultados[
+                            resultados[nr].astype(str).str.lower().str.strip() == 'sim'
+                        ]
+
+                        if not linhas_validas.empty:
+
+                            datas = pd.to_datetime(
+                                linhas_validas['Vencimento Treinamento'],
                                 dayfirst=True,
                                 errors='coerce'
-                            )
+                            ).dropna()
 
                             with st_cols[idx_col % 3]:
-                                if pd.isna(data_v):
-                                    # Sem data -> válido
+
+                                # 🟢 sem data = válido
+                                if datas.empty:
                                     st.success(f"**{nr}**\nVálido (sem data de vencimento)")
                                 else:
-                                    if data_v >= hoje:
-                                        st.success(f"**{nr}**\nVence em: {data_v.strftime('%d/%m/%Y')}")
+                                    data_final = datas.max()
+
+                                    if data_final >= hoje:
+                                        st.success(f"**{nr}**\nVence em: {data_final.strftime('%d/%m/%Y')}")
                                     else:
-                                        st.error(f"**{nr}**\nVENCIDO: {data_v.strftime('%d/%m/%Y')}")
-                                idx_col += 1
+                                        st.error(f"**{nr}**\nVENCIDO: {data_final.strftime('%d/%m/%Y')}")
+
+                            idx_col += 1
 
             else:
                 st.error("Matrícula não encontrada.")
