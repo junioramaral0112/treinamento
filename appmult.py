@@ -17,7 +17,6 @@ st.set_page_config(
 # LINKS DAS PLANILHAS
 # =====================================================
 URL_TREINAMENTOS = "https://docs.google.com/spreadsheets/d/1Qlved6PPLPNSyfhaswGDTgvXkWZ8OcsRRm1yGGaUcz0/export?format=csv&gid=0"
-
 URL_ESCADAS = "https://docs.google.com/spreadsheets/d/131wLP89GL5xTfxe8EN3ajgzoSFH2r69WKEromCd6_i0/export?format=csv&gid=532538193"
 
 # =====================================================
@@ -31,8 +30,10 @@ def tela_treinamentos():
     if matricula_input:
         try:
             df = pd.read_csv(URL_TREINAMENTOS, dtype={1: str})
+            df.columns = df.columns.str.strip()
             df.columns.values[1] = 'Matricula'
 
+            # Normaliza matrícula
             df['Mat_Busca'] = df['Matricula'].astype(str).str.strip().str.lstrip('0')
             busca_limpa = str(matricula_input).strip().lstrip('0')
 
@@ -44,25 +45,22 @@ def tela_treinamentos():
 
                 col_foto, col_info = st.columns([1, 3])
 
-                # =========================
                 # FOTO LOCAL
-                # =========================
                 with col_foto:
                     matricula_foto = str(colaborador_base['Matricula']).strip()
 
-                    caminho_png = f"fotos/{matricula_foto}.png"
-                    caminho_jpg = f"fotos/{matricula_foto}.jpg"
-                    caminho_jpeg = f"fotos/{matricula_foto}.jpeg"
+                    encontrou = False
+                    for ext in ['png', 'jpg', 'jpeg']:
+                        caminho = f"fotos/{matricula_foto}.{ext}"
+                        if os.path.exists(caminho):
+                            st.image(caminho, width=180)
+                            encontrou = True
+                            break
 
-                    if os.path.exists(caminho_png):
-                        st.image(caminho_png, width=180)
-                    elif os.path.exists(caminho_jpg):
-                        st.image(caminho_jpg, width=180)
-                    elif os.path.exists(caminho_jpeg):
-                        st.image(caminho_jpeg, width=180)
-                    else:
+                    if not encontrou:
                         st.image("https://cdn-icons-png.flaticon.com/512/149/149071.png", width=150)
 
+                # INFORMAÇÕES
                 with col_info:
                     st.subheader(f"{colaborador_base['Nome']}")
                     st.write(f"**Unidade:** {colaborador_base['Unidade']} | **Setor:** {colaborador_base['Setor']}")
@@ -82,47 +80,58 @@ def tela_treinamentos():
                 st.divider()
                 st.write("### 📜 Validades de Treinamentos Identificados")
 
-                nrs_para_buscar = ['NR10', 'NR35', 'NR11', 'NR12', 'NR18', 'Troca Gás']
+                # =====================================================
+                # 🔥 DETECÇÃO AUTOMÁTICA DE TREINAMENTOS
+                # =====================================================
+
+                colunas_ignorar = [
+                    'Fotos', 'Matricula', 'Mat_Busca', 'Nome',
+                    'Unidade', 'Setor',
+                    'Data da Realização', 'Vencimento Treinamento',
+                    'Data do ASO', 'Vencimento ASO', 'Observação'
+                ]
+
+                colunas_treinamentos = [
+                    col for col in resultados.columns
+                    if col not in colunas_ignorar
+                ]
 
                 st_cols = st.columns(3)
                 idx_col = 0
 
-                for nr in nrs_para_buscar:
-                    if nr in resultados.columns:
+                for col in colunas_treinamentos:
 
-                        # 🔎 TODAS as linhas com "sim"
-                        linhas_validas = resultados[
-                            resultados[nr].astype(str).str.lower().str.strip() == 'sim'
-                        ]
+                    linhas_validas = resultados[
+                        resultados[col].astype(str).str.lower().str.strip() == 'sim'
+                    ]
 
-                        if not linhas_validas.empty:
+                    if not linhas_validas.empty:
 
-                            datas = pd.to_datetime(
-                                linhas_validas['Vencimento Treinamento'],
-                                dayfirst=True,
-                                errors='coerce'
-                            ).dropna()
+                        datas = pd.to_datetime(
+                            linhas_validas['Vencimento Treinamento'],
+                            dayfirst=True,
+                            errors='coerce'
+                        ).dropna()
 
-                            with st_cols[idx_col % 3]:
+                        with st_cols[idx_col % 3]:
 
-                                # 🟢 sem data = válido
-                                if datas.empty:
-                                    st.success(f"**{nr}**\nVálido (sem data de vencimento)")
+                            if datas.empty:
+                                st.success(f"**{col}**\nVálido (sem data)")
+                            else:
+                                data_final = datas.max()
+
+                                if data_final >= hoje:
+                                    st.success(f"**{col}**\nVence em: {data_final.strftime('%d/%m/%Y')}")
                                 else:
-                                    data_final = datas.max()
+                                    st.error(f"**{col}**\nVENCIDO: {data_final.strftime('%d/%m/%Y')}")
 
-                                    if data_final >= hoje:
-                                        st.success(f"**{nr}**\nVence em: {data_final.strftime('%d/%m/%Y')}")
-                                    else:
-                                        st.error(f"**{nr}**\nVENCIDO: {data_final.strftime('%d/%m/%Y')}")
-
-                            idx_col += 1
+                        idx_col += 1
 
             else:
                 st.error("Matrícula não encontrada.")
 
         except Exception as e:
-            st.error(f"Erro ao processar as linhas da planilha: {e}")
+            st.error(f"Erro ao processar planilha: {e}")
 
 
 # =====================================================
@@ -185,10 +194,12 @@ with st.sidebar:
     st.title("🚀 Portal SST")
     opcao = st.radio("Ferramenta:", ["👤 Treinamentos", "🪜 Escadas"])
     st.divider()
+
     st.link_button(
         "📝 Nova Inspeção (Forms)",
         "https://docs.google.com/forms/d/e/1FAIpQLScyv4M1N9A9v8p6O-n9x_r4_0o-p5W-v7Y-f9-0o-p5W-v7Y/viewform"
     )
+
     if st.button("🔄 Atualizar Dados"):
         st.rerun()
 
